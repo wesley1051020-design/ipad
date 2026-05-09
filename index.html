@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>三民國小 | 班級平板預約系統</title>
+    <style>
+        :root {
+            --sm-blue: #0056b3;
+            --sm-green: #28a745;
+            --bg: #f4f7f6;
+        }
+
+        body { font-family: "Microsoft JhengHei", sans-serif; background: var(--bg); margin: 0; padding: 15px; }
+        .container { max-width: 1000px; margin: 0 auto; background: white; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); overflow: hidden; }
+
+        /* 頂部標題 */
+        .header { background: var(--sm-blue); color: white; padding: 20px; text-align: center; }
+        .header h1 { margin: 0; font-size: 1.4rem; }
+
+        /* 選擇區域 */
+        .nav-bar { background: #fff; padding: 15px; display: flex; gap: 15px; border-bottom: 2px solid #eee; justify-content: center; flex-wrap: wrap; }
+        .nav-bar div { display: flex; align-items: center; gap: 8px; }
+        select { padding: 8px 15px; border-radius: 6px; border: 1px solid #ccc; font-size: 1rem; cursor: pointer; }
+
+        /* 表格樣式 */
+        .table-wrap { padding: 20px; overflow-x: auto; }
+        table { width: 100%; border-collapse: collapse; min-width: 600px; }
+        th, td { border: 1px solid #dee2e6; padding: 15px 10px; text-align: center; }
+        th { background: #f8f9fa; color: #555; }
+
+        .cell { cursor: pointer; transition: 0.3s; border-radius: 4px; }
+        .avail { background: #eafaf1; color: #1e7e34; }
+        .avail:hover { background: #d4edda; }
+        .booked { background: #fff5f5; color: #c82333; font-weight: bold; cursor: not-allowed; }
+
+        /* 底部表單 */
+        .footer-form { padding: 20px; background: #fafafa; border-top: 1px solid #eee; }
+        .input-group { display: flex; gap: 15px; align-items: center; justify-content: center; flex-wrap: wrap; }
+        input { padding: 10px; border: 1px solid #ccc; border-radius: 6px; width: 200px; }
+        
+        .btn-save { 
+            padding: 10px 30px; background: var(--sm-blue); color: white; border: none; 
+            border-radius: 6px; font-weight: bold; cursor: pointer; transition: 0.2s;
+        }
+        .btn-save:hover { background: #004494; }
+
+        /* 驗證視窗 */
+        #auth-box {
+            display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.8);
+            z-index: 100; justify-content: center; align-items: center;
+        }
+        .modal { background: white; padding: 30px; border-radius: 10px; width: 280px; text-align: center; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <div class="header">
+        <h1>三民國小教學平板借用 (班級固定式)</h1>
+    </div>
+
+    <div class="nav-bar">
+        <div>
+            <label>年級：</label>
+            <select id="grade-sel" onchange="updateCartOptions()">
+                <option value="1">一年級</option>
+                <option value="2">二年級</option>
+                <option value="3">三年級</option>
+                <option value="4">四年級</option>
+                <option value="5">五年級</option>
+                <option value="6">六年級</option>
+            </select>
+        </div>
+        <div>
+            <label>平板車：</label>
+            <select id="cart-sel" onchange="refreshData()">
+                </select>
+        </div>
+    </div>
+
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th style="width: 120px;">節次</th>
+                    <th>週一</th><th>週二</th><th>週三</th><th>週四</th><th>週五</th>
+                </tr>
+            </thead>
+            <tbody id="grid-body"></tbody>
+        </table>
+    </div>
+
+    <div class="footer-form">
+        <div class="input-group">
+            <label>借用人姓名：</label>
+            <input type="text" id="teacher-name" placeholder="請輸入姓名">
+            <label>時段：</label>
+            <input type="text" id="slot-display" readonly placeholder="點擊表格選擇" style="background:#eee; width:150px;">
+            <button class="btn-save" onclick="preSubmit()">確認預約</button>
+        </div>
+    </div>
+</div>
+
+<div id="auth-box">
+    <div class="modal">
+        <h3>管理者驗證</h3>
+        <input type="text" id="acc" placeholder="帳號" style="width:100%; margin-bottom:10px;"><br>
+        <input type="password" id="pw" placeholder="密碼" style="width:100%; margin-bottom:15px;"><br>
+        <button class="btn-save" onclick="finalSubmit()">登入並同步</button>
+        <p onclick="document.getElementById('auth-box').style.display='none'" style="cursor:pointer; color:gray; font-size:0.8rem; margin-top:10px;">取消</p>
+    </div>
+</div>
+
+<script>
+    const periods = ["第一節", "第二節", "第三節", "第四節", "第五節", "第六節", "第七節"];
+    let currentKey = "";
+
+    // 1. 根據年級更新車次 (三民國小每學年 2-3 台)
+    function updateCartOptions() {
+        const grade = document.getElementById('grade-sel').value;
+        const cartSel = document.getElementById('cart-sel');
+        cartSel.innerHTML = "";
+        
+        // 假設每個年級都有 3 台車
+        for(let i=1; i<=3; i++) {
+            cartSel.innerHTML += `<option value="${grade}-cart-${i}">${grade}年級 - 平板車 ${i}</option>`;
+        }
+        refreshData();
+    }
+
+    // 2. 刷新該台車的預約數據
+    function refreshData() {
+        const cartId = document.getElementById('cart-sel').value;
+        const db = JSON.parse(localStorage.getItem(cartId)) || {};
+        const tbody = document.getElementById('grid-body');
+        tbody.innerHTML = "";
+
+        periods.forEach((p, pIdx) => {
+            let row = `<tr><td style="font-weight:bold; background:#f8f9fa;">${p}</td>`;
+            for (let dIdx = 1; dIdx <= 5; dIdx++) { // 只顯示週一到週五
+                const key = `${dIdx}-${pIdx}`;
+                if (db[key]) {
+                    row += `<td class="cell booked">已借：${db[key]}</td>`;
+                } else {
+                    row += `<td class="cell avail" onclick="selectCell('${key}', '${p}', ${dIdx})">可預約</td>`;
+                }
+            }
+            row += `</tr>`;
+            tbody.innerHTML += row;
+        });
+    }
+
+    function selectCell(key, p, d) {
+        const days = ["", "週一", "週二", "週三", "週四", "週五"];
+        currentKey = key;
+        document.getElementById('slot-display').value = `${days[d]} ${p}`;
+        document.getElementById('teacher-name').focus();
+    }
+
+    function preSubmit() {
+        if(!currentKey || !document.getElementById('teacher-name').value) {
+            alert('請先點選時段並填寫姓名！'); return;
+        }
+        document.getElementById('auth-box').style.display = 'flex';
+    }
+
+    function finalSubmit() {
+        const acc = document.getElementById('acc').value;
+        const pw = document.getElementById('pw').value;
+        const cartId = document.getElementById('cart-sel').value;
+
+        // 隱藏驗證
+        if (acc === "Wesley" && pw === "ab1051020") {
+            const db = JSON.parse(localStorage.getItem(cartId)) || {};
+            db[currentKey] = document.getElementById('teacher-name').value;
+            localStorage.setItem(cartId, JSON.stringify(db));
+            
+            alert('同步成功！該年級平板車已更新。');
+            document.getElementById('auth-box').style.display = 'none';
+            refreshData();
+        } else {
+            alert('帳號密碼錯誤！');
+        }
+    }
+
+    window.onload = updateCartOptions;
+</script>
+
+</body>
+</html>
